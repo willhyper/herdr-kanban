@@ -194,6 +194,24 @@ test("starting a card goes straight to working and keeps the previous tab select
   assert.equal(h.board.pickFor, null);
 });
 
+test("a new task receives reusable results from done cards", async () => {
+  const h = await harness();
+  h.board.cards.push(
+    { id: "fib-43", title: "fib(43)", status: "done", result: "fib(43) = 433494437" },
+    { id: "fib-44", title: "fib(44)", status: "done", result: "fib(44) = 701408733" },
+    { id: "unfinished", title: "fib(99)", status: "working", result: "Do not use this" },
+  );
+  const card = h.card();
+  card.title = "fib(45)";
+  h.start(card);
+  const prompt = h.commands[0].args.task;
+  assert.match(prompt, /fib\(43\).*433494437/);
+  assert.match(prompt, /fib\(44\).*701408733/);
+  assert.match(prompt, /Reuse relevant results or intermediate values/);
+  assert.match(prompt, /cite the source card title/);
+  assert.doesNotMatch(prompt, /fib\(99\)|Do not use this/);
+});
+
 test("only double clicking a working card focuses its agent panel", async () => {
   const h = await harness();
   const card = h.card();

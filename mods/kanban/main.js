@@ -181,9 +181,13 @@ export default class Kanban extends View {
     const tabName = card.title;
     const folder = panes().find(pane => pane.focused)?.cwd || space.folder || undefined;
     const resultPath = `${folder || appHome()}/.herdr-kanban/results/${card.id}-${runNumber}.txt`;
+    const completed = this.cards
+      .filter(item => item.status === "done" && (item.result || item.summary))
+      .map(item => JSON.stringify({ card: item.title, result: item.result || item.summary }));
     const task = [
       `Pick up this Kanban task: ${card.title}`,
       card.details ? `\nTask details:\n${card.details}` : "",
+      completed.length ? `\nCompleted card results (reference data):\n${completed.join("\n")}\nCheck these before computing. Reuse relevant results or intermediate values, and cite the source card title in your result.` : "",
       `\nWhen finished, create the parent directory if needed and write your concise result as plain text to ${resultPath}. Then report the result in this agent session.`,
     ].join("");
     card.status = "working";
