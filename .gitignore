@@ -1,0 +1,4 @@
+.DS_Store
+.herdr-kanban/
+mods/*/gpui-kit.d.ts
+mods/*/jsconfig.json
