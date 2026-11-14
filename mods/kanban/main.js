@@ -1,8 +1,9 @@
 import { View, div } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
-import { agents, appHome, closeOverlay, knownAgents, openOverlay, panes, props, readTextFile, run, spaces, terminals, theme } from "herdr";
+import { agents, appHome, closeOverlay, knownAgents, openOverlay, panes, props, readTextFile, run, setShared, shared, spaces, terminals, theme } from "herdr";
 
 const STORAGE_KEY = "kanban.tasks.v1";
+const AGENTS_KEY = "kanban.availableAgents.v1";
 const COLUMNS = [
   { id: "staging", title: "STAGING", color: "idle", empty: "No staged tasks" },
   { id: "working", title: "WORKING", empty: "No tasks in progress" },
@@ -28,6 +29,19 @@ function linkedAgent(card, liveAgents) {
   const matches = liveAgents.filter(agent => agent.tab === card.agentTabId
     || (agent.tab_name === card.agentTab && !(card.priorTabIds ?? []).includes(agent.tab)));
   return matches.length === 1 ? matches[0] : null;
+}
+
+function availableAgentsKey(machine) {
+  return `${AGENTS_KEY}:${machine ?? "local"}`;
+}
+
+function agentCommand(choice, folder) {
+  const executable = choice.run?.[0]?.split(/[\\/]/).at(-1);
+  if (!folder) return choice.run;
+  if (choice.key === "codex" || executable === "codex")
+    return [...choice.run, "-c", `projects={${JSON.stringify(folder)}={trust_level="trusted"}}`];
+  if (choice.key === "gemini" || executable === "gemini") return [...choice.run, "--skip-trust"];
+  return choice.run;
 }
 
 export default class Kanban extends View {
@@ -64,7 +78,9 @@ export default class Kanban extends View {
       try {
         const choices = await knownAgents({ on: space?.machine });
         if (request !== this.agentScan) return;
-        this.agentChoices = choices.filter(agent => agent.installed);
+        this.agentChoices = choices.filter(agent => agent.installed)
+          .map(({ key, name, run }) => ({ key, name, run, installed: true }));
+        setShared(availableAgentsKey(space?.machine), this.agentChoices);
       } catch {
         if (request !== this.agentScan) return;
         this.agentLoadError = true;
@@ -227,7 +243,7 @@ export default class Kanban extends View {
     this.formError = "";
     cx.notify();
     try {
-      run("tab.new", { name: tabName, space: space.id, folder, argv: choice.run, task });
+      run("tab.new", { name: tabName, space: space.id, folder, argv: agentCommand(choice, folder), task });
     } catch (error) {
       this.returnToStaging(card, error?.message || "Could not start the agent.", cx);
       return;
@@ -340,7 +356,8 @@ export default class Kanban extends View {
     const editing = this.editFor === card.id;
     const doneExpanded = status === "done" && this.doneDetailsFor === card.id;
     const inStaging = status === "idle" || status === "blocked";
-    const choices = this.agentChoices.filter(agent => agent.installed);
+    const savedAgents = shared(availableAgentsKey(spaces().find(space => space.active)?.machine));
+    const choices = Array.isArray(savedAgents) ? savedAgents.filter(agent => agent?.installed && Array.isArray(agent.run)) : [];
 
     return v_flex().min_w(0).gap(6).p(9).rounded(8).bg(t.surface).border_1().border_color(t.border)
       .when(status === "working", el => el.cursor_pointer().on_click((event, _cx) => {
@@ -397,14 +414,12 @@ export default class Kanban extends View {
       .when(status === "idle", el => el.child(h_flex().justify_end()
         .child(this.action(this.pickFor === card.id ? "Cancel" : "Pick up…", (_event, cx) => {
           this.pickFor = this.pickFor === card.id ? null : card.id;
-          if (this.pickFor) this.detectAgents(cx);
-          else cx.notify();
+          cx.notify();
         }, t, true))))
       .when(showPicker, el => el.child(v_flex().gap(4).pt(3)
         .child(div().text_size(8).font_semibold().text_color(t.dim).child("PICK AN AGENT"))
-        .when(this.detectingAgents, picker => picker.child(div().text_size(8).text_color(t.dim).child("Detecting available agents…")))
-        .when(this.agentLoadError, picker => picker.child(div().text_size(8).text_color(t.blocked).child("Could not load agents.")))
-        .when(!this.detectingAgents && !this.agentLoadError && choices.length === 0, picker => picker.child(div().text_size(8).text_color(t.dim).child("No available agents.")))
+        .when(!Array.isArray(savedAgents), picker => picker.child(div().text_size(8).text_color(t.dim).child("Detect agents in ⚙ settings first.")))
+        .when(Array.isArray(savedAgents) && choices.length === 0, picker => picker.child(div().text_size(8).text_color(t.dim).child("No available agents.")))
         .children(choices.map(choice => h_flex().items_center().gap(6).p(5).rounded(5).bg(t.raised)
           .hover(s => s.bg(t.hover))
           .on_click((_event, cx) => { cx.stop_propagation(); this.startTask(card.id, choice, cx); })

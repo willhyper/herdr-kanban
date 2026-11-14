@@ -69,13 +69,16 @@ async function harness() {
   const commands = [];
   const overlays = [];
   const closedOverlays = [];
+  const sharedState = new Map();
   const results = new Map();
   const savedStatuses = [];
   const liveAgents = [];
   const detectedAgents = [];
+  let detectionCalls = 0;
   const tabs = [{ id: "original", name: "Board", active: true, status: null }];
   const space = { id: "space-1", active: true, folder: "/work", machine: null, tabs };
   let currentProps = {};
+  let workFolder = "/work";
   let failNew = false;
   let nextTab = 0;
   const cx = {
@@ -120,10 +123,11 @@ async function harness() {
     View: class {}, div: () => element("div"), h_flex: () => element("row"), v_flex: () => element("column"),
     InputState: { new: inputState }, TextareaState: { new: inputState },
     Input: { new: () => element("input") }, Textarea: { new: () => element("textarea") },
-    agents: () => liveAgents, appHome: () => "/app", knownAgents: async () => detectedAgents.slice(),
+    agents: () => liveAgents, appHome: () => "/app", knownAgents: async () => { detectionCalls++; return detectedAgents.slice(); },
     openOverlay: spec => { overlays.push(spec); return "settings-1"; },
     closeOverlay: id => { closedOverlays.push(id); }, props: () => currentProps,
-    panes: () => [{ focused: true, cwd: "/work" }],
+    shared: key => sharedState.get(key), setShared: (key, value) => { sharedState.set(key, value); },
+    panes: () => [{ focused: true, cwd: workFolder }],
     readTextFile: async file => results.get(file), run, spaces: () => [space],
     terminals: () => [], theme: () => t,
     localStorage: {
@@ -139,7 +143,10 @@ async function harness() {
   await cx.flush();
   return {
     board, cx, commands, overlays, closedOverlays, results, liveAgents, detectedAgents, tabs, t, memory, savedStatuses,
+    get detectionCalls() { return detectionCalls; },
+    setAvailableAgents(value) { sharedState.set("kanban.availableAgents.v1:local", value); },
     setProps(value) { currentProps = value; },
+    setWorkFolder(value) { workFolder = value; },
     failLaunch() { failNew = true; },
     card(status = "idle") {
       const card = { id: `card-${board.cards.length + 1}`, title: "Inspect sample", details: "Check edges", status, createdAt: Date.now() };
@@ -186,10 +193,10 @@ test("a staged card can be edited by double click, then saved", async () => {
 test("starting a card goes straight to working and keeps the previous tab selected", async () => {
   const h = await harness();
   const card = h.card();
-  h.detectedAgents.push({ name: "Codex", key: "codex", run: ["codex"], installed: true });
+  h.setAvailableAgents([{ name: "Codex", key: "codex", run: ["codex"], installed: true }]);
   click(action(h.board.taskCard(card, "idle", [], h.t), "Pick up…"), h.cx);
   assert.equal(h.board.pickFor, card.id);
-  await h.cx.flush();
+  assert.equal(h.detectionCalls, 0);
   const picker = h.board.taskCard(card, "idle", [], h.t);
   const start = find(picker, node => node.kind === "row" && node.onClick && textOf(node).includes("Start"));
   click(start, h.cx);
@@ -200,6 +207,32 @@ test("starting a card goes straight to working and keeps the previous tab select
   assert.equal(h.commands[1].args.id, "original");
   assert.equal(h.tabs.find(tab => tab.active)?.id, "original");
   assert.equal(h.board.pickFor, null);
+});
+
+test("Codex and Gemini start with their working folder trusted for this launch", async () => {
+  const h = await harness();
+  h.setWorkFolder("/work/my.project");
+  h.start(h.card());
+  assert.equal(h.commands[0].args.folder, "/work/my.project");
+  assert.deepEqual(h.commands[0].args.argv, ["codex", "-c", 'projects={"/work/my.project"={trust_level="trusted"}}']);
+
+  const gemini = await harness();
+  const geminiCard = gemini.card();
+  gemini.board.startTask(geminiCard.id, { name: "Gemini", key: "gemini", run: ["gemini"] }, gemini.cx);
+  assert.deepEqual(gemini.commands[0].args.argv, ["gemini", "--skip-trust"]);
+
+  const other = await harness();
+  const card = other.card();
+  other.board.startTask(card.id, { name: "Claude", key: "claude", run: ["claude"] }, other.cx);
+  assert.deepEqual(other.commands[0].args.argv, ["claude"]);
+});
+
+test("the picker reads saved settings without detecting agents", async () => {
+  const h = await harness();
+  const card = h.card();
+  click(action(h.board.taskCard(card, "idle", [], h.t), "Pick up…"), h.cx);
+  assert.match(textOf(h.board.taskCard(card, "idle", [], h.t)), /Detect agents in ⚙ settings first/);
+  assert.equal(h.detectionCalls, 0);
 });
 
 test("settings detects available agents and the picker excludes unavailable ones", async () => {
@@ -215,19 +248,21 @@ test("settings detects available agents and the picker excludes unavailable ones
   const settings = new h.board.constructor();
   settings.init({ settings: true }, h.cx);
   await h.cx.flush();
+  assert.equal(h.detectionCalls, 1);
   assert.match(textOf(settings.render(h.cx)), /kanban setting.*Available agents.*Codex/);
   assert.doesNotMatch(textOf(settings.render(h.cx)), /Unavailable/);
 
   h.detectedAgents.push({ name: "Claude", key: "claude", run: ["claude"], installed: true });
   click(action(settings.render(h.cx), "Detect agents"), h.cx);
   await h.cx.flush();
+  assert.equal(h.detectionCalls, 2);
   assert.match(textOf(settings.render(h.cx)), /Claude/);
   click(action(settings.render(h.cx), "Close"), h.cx);
   assert.deepEqual(h.closedOverlays, ["settings-1"]);
 
   const card = h.card();
   click(action(h.board.taskCard(card, "idle", [], h.t), "Pick up…"), h.cx);
-  await h.cx.flush();
+  assert.equal(h.detectionCalls, 2);
   const picker = textOf(h.board.taskCard(card, "idle", [], h.t));
   assert.match(picker, /Codex.*Claude/);
   assert.doesNotMatch(picker, /Unavailable/);
