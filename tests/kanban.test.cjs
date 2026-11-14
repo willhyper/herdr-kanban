@@ -235,7 +235,7 @@ test("the picker reads saved settings without detecting agents", async () => {
   assert.equal(h.detectionCalls, 0);
 });
 
-test("settings detects available agents and the picker excludes unavailable ones", async () => {
+test("settings checkboxes select which detected agents appear in the picker", async () => {
   const h = await harness();
   h.detectedAgents.push(
     { name: "Codex", key: "codex", run: ["codex"], installed: true },
@@ -257,14 +257,21 @@ test("settings detects available agents and the picker excludes unavailable ones
   await h.cx.flush();
   assert.equal(h.detectionCalls, 2);
   assert.match(textOf(settings.render(h.cx)), /Claude/);
+  const codexRow = find(settings.render(h.cx), node => node.kind === "row" && node.onClick && textOf(node).includes("Codex"));
+  click(codexRow, h.cx);
+  assert.equal(settings.agentChoices.find(agent => agent.key === "codex").selected, false);
+  click(action(settings.render(h.cx), "Detect agents"), h.cx);
+  await h.cx.flush();
+  assert.equal(settings.agentChoices.find(agent => agent.key === "codex").selected, false);
   click(action(settings.render(h.cx), "Close"), h.cx);
   assert.deepEqual(h.closedOverlays, ["settings-1"]);
 
   const card = h.card();
   click(action(h.board.taskCard(card, "idle", [], h.t), "Pick up…"), h.cx);
-  assert.equal(h.detectionCalls, 2);
+  assert.equal(h.detectionCalls, 3);
   const picker = textOf(h.board.taskCard(card, "idle", [], h.t));
-  assert.match(picker, /Codex.*Claude/);
+  assert.match(picker, /Claude/);
+  assert.doesNotMatch(picker, /Codex/);
   assert.doesNotMatch(picker, /Unavailable/);
 });
 

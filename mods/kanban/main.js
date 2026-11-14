@@ -70,6 +70,7 @@ export default class Kanban extends View {
   detectAgents(cx) {
     const request = ++this.agentScan;
     const space = spaces().find(item => item.active);
+    this.agentMachine = space?.machine;
     this.agentChoices = [];
     this.agentLoadError = false;
     this.detectingAgents = true;
@@ -78,8 +79,10 @@ export default class Kanban extends View {
       try {
         const choices = await knownAgents({ on: space?.machine });
         if (request !== this.agentScan) return;
+        const saved = shared(availableAgentsKey(space?.machine));
+        const selected = new Map(Array.isArray(saved) ? saved.map(agent => [agent.key, agent.selected !== false]) : []);
         this.agentChoices = choices.filter(agent => agent.installed)
-          .map(({ key, name, run }) => ({ key, name, run, installed: true }));
+          .map(({ key, name, run }) => ({ key, name, run, installed: true, selected: selected.get(key) ?? true }));
         setShared(availableAgentsKey(space?.machine), this.agentChoices);
       } catch {
         if (request !== this.agentScan) return;
@@ -88,6 +91,14 @@ export default class Kanban extends View {
       this.detectingAgents = false;
       cx.notify();
     });
+  }
+
+  toggleAgent(key, cx) {
+    this.agentChoices = this.agentChoices.map(agent => agent.key === key
+      ? { ...agent, selected: agent.selected === false }
+      : agent);
+    setShared(availableAgentsKey(this.agentMachine), this.agentChoices);
+    cx.notify();
   }
 
   collectFinishedTasks(cx) {
@@ -357,7 +368,7 @@ export default class Kanban extends View {
     const doneExpanded = status === "done" && this.doneDetailsFor === card.id;
     const inStaging = status === "idle" || status === "blocked";
     const savedAgents = shared(availableAgentsKey(spaces().find(space => space.active)?.machine));
-    const choices = Array.isArray(savedAgents) ? savedAgents.filter(agent => agent?.installed && Array.isArray(agent.run)) : [];
+    const choices = Array.isArray(savedAgents) ? savedAgents.filter(agent => agent?.installed && agent.selected !== false && Array.isArray(agent.run)) : [];
 
     return v_flex().min_w(0).gap(6).p(9).rounded(8).bg(t.surface).border_1().border_color(t.border)
       .when(status === "working", el => el.cursor_pointer().on_click((event, _cx) => {
@@ -477,7 +488,11 @@ export default class Kanban extends View {
         el => el.child(div().text_size(9).text_color(t.dim).child("No available agents found.")))
       .child(v_flex().flex_1().min_h(0).overflow_y_scrollbar().gap(5)
         .children(this.agentChoices.map(agent => h_flex().items_center().gap(7).p(7).rounded(5).bg(t.surface)
-          .child(div().w(6).h(6).rounded(3).bg(t.working))
+          .cursor_pointer().hover(s => s.bg(t.hover))
+          .on_click((_event, cx) => this.toggleAgent(agent.key, cx))
+          .child(div().w(15).h(15).rounded(3).border(1).border_color(agent.selected ? t.accent : t.input)
+            .bg(agent.selected ? t.accent : t.background).text_color(t.accent_foreground).text_size(11)
+            .child(agent.selected ? "✓" : ""))
           .child(div().text_size(10).child(agent.name)))));
   }
 
