@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { h_flex, v_flex, InputState, Input, TextareaState, Textarea } from "gpui-base";
-import { agents, appHome, knownAgents, panes, readTextFile, run, spaces, terminals, theme } from "herdr";
+import { agents, appHome, closeOverlay, knownAgents, openOverlay, panes, props, readTextFile, run, spaces, terminals, theme } from "herdr";
 
 const STORAGE_KEY = "kanban.tasks.v1";
 const COLUMNS = [
@@ -32,11 +32,14 @@ function linkedAgent(card, liveAgents) {
 
 export default class Kanban extends View {
   init(_props, cx) {
+    this.settingsMode = Boolean(props()?.settings);
     this.cards = readCards();
     this.creating = false;
     this.pickFor = null;
     this.agentChoices = [];
     this.agentLoadError = false;
+    this.detectingAgents = false;
+    this.agentScan = 0;
     this.formError = "";
     this.editFor = null;
     this.editError = "";
@@ -46,16 +49,29 @@ export default class Kanban extends View {
     this.editTitleInput = InputState.new({ placeholder: "Task title" });
     this.editDetailsInput = TextareaState.new({ placeholder: "Task details", rows: 3 });
     this.titleInput.on("submit", (_event, cx) => this.createCard(cx));
+    if (this.settingsMode) this.detectAgents(cx);
+    else this.completionTimer = cx.timer.every(500, cx => this.collectFinishedTasks(cx));
+  }
+
+  detectAgents(cx) {
+    const request = ++this.agentScan;
     const space = spaces().find(item => item.active);
+    this.agentChoices = [];
+    this.agentLoadError = false;
+    this.detectingAgents = true;
+    cx.notify();
     cx.spawn(async cx => {
       try {
-        this.agentChoices = await knownAgents({ on: space?.machine });
+        const choices = await knownAgents({ on: space?.machine });
+        if (request !== this.agentScan) return;
+        this.agentChoices = choices.filter(agent => agent.installed);
       } catch {
+        if (request !== this.agentScan) return;
         this.agentLoadError = true;
       }
+      this.detectingAgents = false;
       cx.notify();
     });
-    this.completionTimer = cx.timer.every(500, cx => this.collectFinishedTasks(cx));
   }
 
   collectFinishedTasks(cx) {
@@ -381,12 +397,14 @@ export default class Kanban extends View {
       .when(status === "idle", el => el.child(h_flex().justify_end()
         .child(this.action(this.pickFor === card.id ? "Cancel" : "Pick up…", (_event, cx) => {
           this.pickFor = this.pickFor === card.id ? null : card.id;
-          cx.notify();
+          if (this.pickFor) this.detectAgents(cx);
+          else cx.notify();
         }, t, true))))
       .when(showPicker, el => el.child(v_flex().gap(4).pt(3)
         .child(div().text_size(8).font_semibold().text_color(t.dim).child("PICK AN AGENT"))
+        .when(this.detectingAgents, picker => picker.child(div().text_size(8).text_color(t.dim).child("Detecting available agents…")))
         .when(this.agentLoadError, picker => picker.child(div().text_size(8).text_color(t.blocked).child("Could not load agents.")))
-        .when(!this.agentLoadError && choices.length === 0, picker => picker.child(div().text_size(8).text_color(t.dim).child("No installed agents available.")))
+        .when(!this.detectingAgents && !this.agentLoadError && choices.length === 0, picker => picker.child(div().text_size(8).text_color(t.dim).child("No available agents.")))
         .children(choices.map(choice => h_flex().items_center().gap(6).p(5).rounded(5).bg(t.raised)
           .hover(s => s.bg(t.hover))
           .on_click((_event, cx) => { cx.stop_propagation(); this.startTask(card.id, choice, cx); })
@@ -417,18 +435,40 @@ export default class Kanban extends View {
           .child(div().truncate().text_size(10).font_semibold().text_color(t.foreground).child(column.title)))
         .child(h_flex().items_center().gap(6)
           .child(div().text_size(9).text_color(t.dim).child(String(cards.length)))
-          .when(column.id === "staging", el => el.child(this.action(this.creating ? "Close" : "+ New card", (_event, cx) => {
-            this.creating = !this.creating;
-            this.formError = "";
-            cx.notify();
-          }, t, true)))))
+          .when(column.id === "staging", el => el
+            .child(this.action(this.creating ? "Close" : "+ New card", (_event, cx) => {
+              this.creating = !this.creating;
+              this.formError = "";
+              cx.notify();
+            }, t, true))
+            .child(this.action("⚙", () => openOverlay({ mod: "kanban", kind: "dialog", width: 420, height: 300, props: { settings: true } }), t)
+              .text_size(14).py(2)))))
       .child(v_flex().flex_1().min_h(0).overflow_y_scrollbar().gap(7)
         .when(cards.length === 0, el => el.child(div().p(9).rounded(7).bg(t.surface).text_size(8).text_color(t.dim).child(column.empty)))
         .children(rows));
   }
 
+  renderSettings(t) {
+    return v_flex().size_full().gap(10).p(14).bg(t.background).text_color(t.foreground)
+      .child(h_flex().items_center().justify_between()
+        .child(div().text_size(14).font_semibold().child("kanban setting"))
+        .child(this.action("Close", () => closeOverlay(props().overlay), t)))
+      .child(h_flex().items_center().justify_between()
+        .child(div().text_size(10).font_semibold().child("Available agents"))
+        .child(this.action("Detect agents", (_event, cx) => this.detectAgents(cx), t)))
+      .when(this.detectingAgents, el => el.child(div().text_size(9).text_color(t.dim).child("Detecting available agents…")))
+      .when(this.agentLoadError, el => el.child(div().text_size(9).text_color(t.blocked).child("Could not detect agents.")))
+      .when(!this.detectingAgents && !this.agentLoadError && this.agentChoices.length === 0,
+        el => el.child(div().text_size(9).text_color(t.dim).child("No available agents found.")))
+      .child(v_flex().flex_1().min_h(0).overflow_y_scrollbar().gap(5)
+        .children(this.agentChoices.map(agent => h_flex().items_center().gap(7).p(7).rounded(5).bg(t.surface)
+          .child(div().w(6).h(6).rounded(3).bg(t.working))
+          .child(div().text_size(10).child(agent.name)))));
+  }
+
   render(_cx) {
     const t = theme();
+    if (this.settingsMode) return this.renderSettings(t);
     const liveAgents = agents();
     const groups = new Map(COLUMNS.map(column => [column.id, []]));
     const cards = this.cards.map(card => {

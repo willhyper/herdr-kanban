@@ -67,11 +67,15 @@ function loadView(file, dependencies, className = "Kanban") {
 async function harness() {
   const memory = new Map();
   const commands = [];
+  const overlays = [];
+  const closedOverlays = [];
   const results = new Map();
   const savedStatuses = [];
   const liveAgents = [];
+  const detectedAgents = [];
   const tabs = [{ id: "original", name: "Board", active: true, status: null }];
   const space = { id: "space-1", active: true, folder: "/work", machine: null, tabs };
+  let currentProps = {};
   let failNew = false;
   let nextTab = 0;
   const cx = {
@@ -116,7 +120,9 @@ async function harness() {
     View: class {}, div: () => element("div"), h_flex: () => element("row"), v_flex: () => element("column"),
     InputState: { new: inputState }, TextareaState: { new: inputState },
     Input: { new: () => element("input") }, Textarea: { new: () => element("textarea") },
-    agents: () => liveAgents, appHome: () => "/app", knownAgents: async () => [],
+    agents: () => liveAgents, appHome: () => "/app", knownAgents: async () => detectedAgents.slice(),
+    openOverlay: spec => { overlays.push(spec); return "settings-1"; },
+    closeOverlay: id => { closedOverlays.push(id); }, props: () => currentProps,
     panes: () => [{ focused: true, cwd: "/work" }],
     readTextFile: async file => results.get(file), run, spaces: () => [space],
     terminals: () => [], theme: () => t,
@@ -132,7 +138,8 @@ async function harness() {
   board.init({}, cx);
   await cx.flush();
   return {
-    board, cx, commands, results, liveAgents, tabs, t, memory, savedStatuses,
+    board, cx, commands, overlays, closedOverlays, results, liveAgents, detectedAgents, tabs, t, memory, savedStatuses,
+    setProps(value) { currentProps = value; },
     failLaunch() { failNew = true; },
     card(status = "idle") {
       const card = { id: `card-${board.cards.length + 1}`, title: "Inspect sample", details: "Check edges", status, createdAt: Date.now() };
@@ -179,9 +186,10 @@ test("a staged card can be edited by double click, then saved", async () => {
 test("starting a card goes straight to working and keeps the previous tab selected", async () => {
   const h = await harness();
   const card = h.card();
-  h.board.agentChoices = [{ name: "Codex", key: "codex", run: ["codex"], installed: true }];
+  h.detectedAgents.push({ name: "Codex", key: "codex", run: ["codex"], installed: true });
   click(action(h.board.taskCard(card, "idle", [], h.t), "Pick up…"), h.cx);
   assert.equal(h.board.pickFor, card.id);
+  await h.cx.flush();
   const picker = h.board.taskCard(card, "idle", [], h.t);
   const start = find(picker, node => node.kind === "row" && node.onClick && textOf(node).includes("Start"));
   click(start, h.cx);
@@ -192,6 +200,37 @@ test("starting a card goes straight to working and keeps the previous tab select
   assert.equal(h.commands[1].args.id, "original");
   assert.equal(h.tabs.find(tab => tab.active)?.id, "original");
   assert.equal(h.board.pickFor, null);
+});
+
+test("settings detects available agents and the picker excludes unavailable ones", async () => {
+  const h = await harness();
+  h.detectedAgents.push(
+    { name: "Codex", key: "codex", run: ["codex"], installed: true },
+    { name: "Unavailable", key: "missing", run: ["missing"], installed: false },
+  );
+  click(action(h.board.statusColumn({ id: "staging", title: "STAGING" }, [], [], h.t), "⚙"), h.cx);
+  assert.deepEqual(h.overlays[0], { mod: "kanban", kind: "dialog", width: 420, height: 300, props: { settings: true } });
+
+  h.setProps({ settings: true, overlay: "settings-1" });
+  const settings = new h.board.constructor();
+  settings.init({ settings: true }, h.cx);
+  await h.cx.flush();
+  assert.match(textOf(settings.render(h.cx)), /kanban setting.*Available agents.*Codex/);
+  assert.doesNotMatch(textOf(settings.render(h.cx)), /Unavailable/);
+
+  h.detectedAgents.push({ name: "Claude", key: "claude", run: ["claude"], installed: true });
+  click(action(settings.render(h.cx), "Detect agents"), h.cx);
+  await h.cx.flush();
+  assert.match(textOf(settings.render(h.cx)), /Claude/);
+  click(action(settings.render(h.cx), "Close"), h.cx);
+  assert.deepEqual(h.closedOverlays, ["settings-1"]);
+
+  const card = h.card();
+  click(action(h.board.taskCard(card, "idle", [], h.t), "Pick up…"), h.cx);
+  await h.cx.flush();
+  const picker = textOf(h.board.taskCard(card, "idle", [], h.t));
+  assert.match(picker, /Codex.*Claude/);
+  assert.doesNotMatch(picker, /Unavailable/);
 });
 
 test("a new task receives reusable results from done cards", async () => {
