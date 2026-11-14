@@ -176,6 +176,7 @@ export default class Kanban extends View {
     }
     const card = this.cards.find(item => item.id === cardId);
     if (!card) return;
+    const previousTab = space.tabs?.find(tab => tab.active)?.id;
     const runNumber = (card.runNumber ?? 0) + 1;
     const tabName = card.title;
     const folder = panes().find(pane => pane.focused)?.cwd || space.folder || undefined;
@@ -210,6 +211,13 @@ export default class Kanban extends View {
     } catch (error) {
       this.returnToStaging(card, error?.message || "Could not start the agent.", cx);
       return;
+    }
+    if (previousTab) {
+      try { run("tab.select", { id: previousTab }); }
+      catch (error) {
+        this.formError = error?.message || "Could not restore the previous tab.";
+        cx.notify();
+      }
     }
     // A failed agent launch can leave its shell tab behind with no agent status.
     // Give the agent a moment to initialize, then return that card to staging.
@@ -315,7 +323,8 @@ export default class Kanban extends View {
     const choices = this.agentChoices.filter(agent => agent.installed);
 
     return v_flex().min_w(0).gap(6).p(9).rounded(8).bg(t.surface).border_1().border_color(t.border)
-      .when(status === "working", el => el.cursor_pointer().on_click((_event, _cx) => {
+      .when(status === "working", el => el.cursor_pointer().on_click((event, _cx) => {
+        if (event.click_count < 2) return;
         const allSpaces = spaces();
         const taskTab = allSpaces.flatMap(space => space.tabs ?? []).find(item => item.id === card.agentTabId
           || (item.name === card.agentTab && !(card.priorTabIds ?? []).includes(item.id)));
