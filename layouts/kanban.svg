@@ -6,18 +6,23 @@
   <rect x="160" y="16" width="784" height="42" rx="8" fill="#202c28"/>
   <rect x="160" y="70" width="784" height="245" rx="10" fill="#17201e" stroke="#34423b"/>
   <g fill="#26332e">
-    <rect x="176" y="94" width="240" height="204" rx="7"/>
-    <rect x="424" y="94" width="240" height="204" rx="7"/>
-    <rect x="672" y="94" width="256" height="204" rx="7"/>
+    <rect x="176" y="94" width="245" height="204" rx="7"/>
+    <rect x="429" y="94" width="123" height="204" rx="7"/>
+    <rect x="560" y="94" width="368" height="204" rx="7"/>
   </g>
   <g fill="#9bb8a4">
     <rect x="188" y="108" width="84" height="6" rx="3"/>
-    <rect x="436" y="108" width="82" height="6" rx="3"/>
-    <rect x="684" y="108" width="48" height="6" rx="3"/>
+    <rect x="441" y="108" width="70" height="6" rx="3"/>
+    <rect x="572" y="108" width="48" height="6" rx="3"/>
   </g>
-  <rect x="188" y="130" width="216" height="66" rx="5" fill="#34423b"/>
-  <rect x="436" y="130" width="216" height="66" rx="5" fill="#34423b"/>
-  <rect x="684" y="130" width="232" height="66" rx="5" fill="#34423b"/>
+  <g fill="#34423b">
+    <rect x="188" y="130" width="107" height="66" rx="5"/>
+    <rect x="302" y="130" width="107" height="66" rx="5"/>
+    <rect x="441" y="130" width="99" height="66" rx="5"/>
+    <rect x="572" y="130" width="110" height="66" rx="5"/>
+    <rect x="689" y="130" width="110" height="66" rx="5"/>
+    <rect x="806" y="130" width="110" height="66" rx="5"/>
+  </g>
   <rect x="160" y="327" width="784" height="197" rx="10" fill="#17201e" stroke="#34423b"/>
   <rect x="176" y="343" width="752" height="27" rx="5" fill="#26332e"/>
   <rect x="190" y="392" width="530" height="5" rx="2" fill="#9bb8a4"/>

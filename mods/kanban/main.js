@@ -385,7 +385,19 @@ export default class Kanban extends View {
 
   statusColumn(column, cards, liveAgents, t) {
     const color = t[column.color || column.id] ?? t.dim;
-    return v_flex().flex_1().min_w(0).min_h(0).gap(7)
+    const cardsPerRow = column.id === "staging" ? 2 : column.id === "done" ? 3 : 1;
+    const rows = [];
+    for (let i = 0; i < cards.length; i += cardsPerRow) {
+      const rowCards = cards.slice(i, i + cardsPerRow);
+      if (cardsPerRow === 1) {
+        rows.push(this.taskCard(rowCards[0].card, rowCards[0].status, liveAgents, t));
+      } else {
+        rows.push(h_flex().items_start().gap(7)
+          .children(rowCards.map(({ card, status }) => this.taskCard(card, status, liveAgents, t).flex_1()))
+          .children(Array.from({ length: cardsPerRow - rowCards.length }, () => div().flex_1())));
+      }
+    }
+    return v_flex().flex_basis(0).flex_grow(cardsPerRow).min_w(0).min_h(0).gap(7)
       .child(h_flex().items_center().justify_between().gap(5).px(2)
         .child(h_flex().items_center().gap(6)
           .child(div().w(7).h(7).rounded(4).bg(color))
@@ -399,7 +411,7 @@ export default class Kanban extends View {
           }, t, true)))))
       .child(v_flex().flex_1().min_h(0).overflow_y_scrollbar().gap(7)
         .when(cards.length === 0, el => el.child(div().p(9).rounded(7).bg(t.surface).text_size(8).text_color(t.dim).child(column.empty)))
-        .children(cards.map(({ card, status }) => this.taskCard(card, status, liveAgents, t))));
+        .children(rows));
   }
 
   render(_cx) {
